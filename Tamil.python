@@ -1,0 +1,86 @@
+import numpy as np
+import pandas as pd
+import cv2
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+
+# Example e-waste metadata
+data = {
+    'Material': ['Plastic', 'Metal', 'Glass', 'Plastic', 'Metal'],
+    'Size': ['Small', 'Large', 'Medium', 'Small', 'Large'],
+    'Condition': ['Good', 'Bad', 'Good', 'Bad', 'Good'],
+    'Image_Path': ['plastic_small_good.jpg', 'metal_large_bad.jpg', 'glass_medium_good.jpg', 'plastic_small_bad.jpg', 'metal_large_good.jpg'],
+    'Recycled': ['Yes', 'No', 'Yes', 'No', 'Yes']
+}
+
+df = pd.DataFrame(data)
+
+# Convert categorical columns to numerical values
+label_encoder = LabelEncoder()
+df['Material'] = label_encoder.fit_transform(df['Material'])
+df['Size'] = label_encoder.fit_transform(df['Size'])
+df['Condition'] = label_encoder.fit_transform(df['Condition'])
+df['Recycled'] = label_encoder.fit_transform(df['Recycled'])
+
+# Load images and metadata
+X_images = []
+X_metadata = []
+y = df['Recycled']
+
+for idx, row in df.iterrows():
+    img = cv2.imread(row['Image_Path'])
+    img = cv2.resize(img, (128, 128))  # Resize image for uniformity
+    X_images.append(img)
+    
+    # Collect metadata features
+    X_metadata.append([row['Material'], row['Size'], row['Condition']])
+
+X_images = np.array(X_images) / 255.0  # Normalize image data
+X_metadata = np.array(X_metadata)
+
+# Split data into training and testing sets
+X_train_images, X_test_images, X_train_metadata, X_test_metadata, y_train, y_test = train_test_split(X_images, X_metadata, y, test_size=0.3, random_state=42)
+
+# Build a Convolutional Neural Network model for image classification
+image_input = tf.keras.Input(shape=(128, 128, 3))
+x = Conv2D(32, (3, 3), activation='relu')(image_input)
+x = MaxPooling2D((2, 2))(x)
+x = Flatten()(x)
+x = Dense(64, activation='relu')(x)
+x = Dropout(0.5)(x)
+
+# Build the metadata input part
+metadata_input = tf.keras.Input(shape=(3,))  # 3 metadata features
+y = Dense(32, activation='relu')(metadata_input)
+y = Dropout(0.5)(y)
+
+# Combine image and metadata features
+combined = tf.keras.layers.concatenate([x, y])
+
+# Output layer for binary classification (Recycled: Yes/No)
+output = Dense(1, activation='sigmoid')(combined)
+
+# Create and compile the model
+model = tf.keras.Model(inputs=[image_input, metadata_input], outputs=output)
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit([X_train_images, X_train_metadata], y_train, epochs=10, batch_size=2, validation_data=([X_test_images, X_test_metadata], y_test))
+
+# Evaluate the model
+test_loss, test_accuracy = model.evaluate([X_test_images, X_test_metadata], y_test)
+print(f'Test Accuracy: {test_accuracy * 100:.2f}%')
+
+# Make a prediction on a new sample (metadata + image)
+sample_image = cv2.imread('plastic_small_good.jpg')
+sample_image = cv2.resize(sample_image, (128, 128)) / 255.0
+sample_metadata = np.array([[label_encoder.transform(['Plastic'])[0], label_encoder.transform(['Small'])[0], label_encoder.transform(['Good'])[0]]])
+
+prediction = model.predict([np.expand_dims(sample_image, axis=0), sample_metadata])
+if prediction >= 0.5:
+    print("This e-waste can be recycled.")
+else:
+    print("This e-waste cannot be recycled.")
